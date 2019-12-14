@@ -74,7 +74,15 @@ import {
   SET_INPUT_SCRIPT,
   VARIABLE_ADD_FLAGS,
   VARIABLE_CLEAR_FLAGS,
-  TEXT_WITH_AVATAR
+  SOUND_START_TONE,
+  SOUND_STOP_TONE,
+  SOUND_PLAY_BEEP,
+  SOUND_PLAY_CRASH,
+  SET_TIMER_SCRIPT,
+  TIMER_RESTART,
+  TIMER_DISABLE,
+  TEXT_WITH_AVATAR,
+  MENU
 } from "../../../src/lib/events/scriptCommands";
 import {
   dirDec,
@@ -365,7 +373,7 @@ test("Should default to empty display text", () => {
 test("Should be able to display text with avatar", () => {
   const output = [];
   const strings = ["First Text"];
-  const avatars = [ { id: "avatar-1" }, { id: "avatar-2" }];
+  const avatars = [{ id: "avatar-1" }, { id: "avatar-2" }];
   const sb = new ScriptBuilder(output, { strings, avatars });
   sb.textDialogue("First Text", "avatar-2");
   expect(output).toEqual([cmd(TEXT_WITH_AVATAR), 0, 0, 1]);
@@ -388,6 +396,52 @@ test("Should not store choice text multiple times", () => {
   sb.textChoice("2", { trueText: "One", falseText: "Two" });
   expect(output).toEqual([cmd(CHOICE), 0, 2, 0, 0]);
   expect(strings).toEqual(["One\nTwo"]);
+});
+
+test("Should be able to display menu with default values", () => {
+  const output = [];
+  const strings = ["Hello World"];
+  const sb = new ScriptBuilder(output, { variables: ["0", "1", "2"], strings });
+  sb.textMenu("2", [ "item1", "item2", "item3" ]);
+  expect(output).toEqual([cmd(MENU), 0, 2, 0, 1, 1, 0]);
+  expect(strings).toEqual(["Hello World", "item1\nitem2\nitem3"]);
+});
+
+test("Should be able to display menu with different config values", () => {
+  const output = [];
+  const strings = ["Hello World"];
+  const sb = new ScriptBuilder(output, { variables: ["0", "1", "2"], strings });
+
+  // cancelOnLastOption = false, cancelOnB = false, layout = "menu"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "menu", false, false);
+  // cancelOnLastOption = true, cancelOnB = false, layout = "menu"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "menu", true, false);
+  // cancelOnLastOption = false, cancelOnB = true, layout = "menu"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "menu", false, true);
+  // cancelOnLastOption = true, cancelOnB = true, layout = "menu"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "menu", true, true);
+
+  // cancelOnLastOption = false, cancelOnB = false, layout = "dialogue"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "dialogue", false, false);
+  // cancelOnLastOption = true, cancelOnB = false, layout = "dialogue"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "dialogue", true, false);
+  // cancelOnLastOption = false, cancelOnB = true, layout = "dialogue"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "dialogue", false, true);
+  // cancelOnLastOption = true, cancelOnB = true, layout = "menu"
+  sb.textMenu("2", [ "item1", "item2", "item3" ], "dialogue", true, true);
+
+  expect(output).toEqual([
+    cmd(MENU), 0, 2, 0, 1, 1, 0,
+    cmd(MENU), 0, 2, 0, 1, 1, 1,
+    cmd(MENU), 0, 2, 0, 1, 1, 2,
+    cmd(MENU), 0, 2, 0, 1, 1, 3,
+
+    cmd(MENU), 0, 2, 0, 1, 0, 0,
+    cmd(MENU), 0, 2, 0, 1, 0, 1,
+    cmd(MENU), 0, 2, 0, 1, 0, 2,
+    cmd(MENU), 0, 2, 0, 1, 0, 3,
+  ]);
+  expect(strings).toEqual(["Hello World", "item1\nitem2\nitem3"]);
 });
 
 test("Should be able to set text box to open instantly", () => {
@@ -840,10 +894,11 @@ test("Should be able to define a label", () => {
   const sb = new ScriptBuilder(output, {
     compileEvents: () => {
       output.push(99);
-    }
+    },
+    labels: {}
   });
   sb.labelDefine("my_label");
-  expect(sb.labels.my_label).toBe(2);
+  expect(sb.options.labels.my_label).toBe(2);
 });
 
 test("Should be replace gotos with label ptrs if found", () => {
@@ -851,10 +906,11 @@ test("Should be replace gotos with label ptrs if found", () => {
   const sb = new ScriptBuilder(output, {
     compileEvents: () => {
       output.push(99);
-    }
+    },
+    labels: {}
   });
   sb.labelDefine("my_label");
-  expect(sb.labels.my_label).toBe(7);
+  expect(sb.options.labels.my_label).toBe(7);
   expect(output).toEqual([5, 6, cmd(JUMP), 0, 7, 7, 8]);
 });
 
@@ -863,7 +919,8 @@ test("Should be able to goto a label", () => {
   const sb = new ScriptBuilder(output, {
     compileEvents: () => {
       output.push(99);
-    }
+    },
+    labels: {}
   });
   sb.labelDefine("my_label");
   sb.labelGoto("my_label");
@@ -875,7 +932,8 @@ test("Should add goto playholder if not defined yet", () => {
   const sb = new ScriptBuilder(output, {
     compileEvents: () => {
       output.push(99);
-    }
+    },
+    labels: {}
   });
   sb.labelGoto("my_label");
   expect(output).toEqual([5, `goto: my_label`, 0, 0]);
@@ -935,6 +993,60 @@ test("Should be able to remove input script", () => {
   expect(output).toEqual([cmd(REMOVE_INPUT_SCRIPT), inputDec(["b"])]);
 });
 
+test("Should be able to add timer script", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output, {
+    compileEvents: (input, subScript) => {
+      subScript.push(99);
+    },
+    banked: {
+      push: () => {
+        return {
+          bank: 99,
+          offset: 200
+        };
+      }
+    }
+  });
+  sb.timerScriptSet(16.0, []);
+  expect(output).toEqual([cmd(SET_TIMER_SCRIPT), 60, 99, 0, 200]);
+});
+
+test("Should be able to add timer script as function", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output, {
+    compileEvents: (input, subScript) => {
+      subScript.push(99);
+    },
+    banked: {
+      push: () => {
+        return {
+          bank: 99,
+          offset: 200
+        };
+      }
+    }
+  });
+  sb.timerScriptSet(16.0, () => {
+    sb.spritesHide();
+  });
+  expect(output).toEqual([cmd(SET_TIMER_SCRIPT), 60, 99, 0, 200]);
+});
+
+test("Should be able to remove timer script", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.timerDisable();
+  expect(output).toEqual([cmd(TIMER_DISABLE)]);
+});
+
+test("Should be able to restart countdown timer", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.timerRestart();
+  expect(output).toEqual([cmd(TIMER_RESTART)]);
+});
+
 test("Should be able to play music", () => {
   const output = [];
   const sb = new ScriptBuilder(output, {
@@ -985,6 +1097,41 @@ test("Should be able to stop music", () => {
   });
   sb.musicStop();
   expect(output).toEqual([cmd(MUSIC_STOP)]);
+});
+
+test("Should be able to start a tone with period 1000", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.soundStartTone(1000);
+  expect(output).toEqual([cmd(SOUND_START_TONE), 3, 232]);
+});
+
+test("Should be able to stop a tone", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.soundStopTone();
+  expect(output).toEqual([cmd(SOUND_STOP_TONE)]);
+});
+
+test("Should be able to play a beep sound with pitch 8", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.soundPlayBeep(8);
+  expect(output).toEqual([cmd(SOUND_PLAY_BEEP), 7]);
+});
+
+test("Should be able to play a beep sound with pitch 1", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.soundPlayBeep(1);
+  expect(output).toEqual([cmd(SOUND_PLAY_BEEP), 0]);
+});
+
+test("Should be able to play a crash sound", () => {
+  const output = [];
+  const sb = new ScriptBuilder(output);
+  sb.soundPlayCrash();
+  expect(output).toEqual([cmd(SOUND_PLAY_CRASH)]);
 });
 
 test("Should be able to fade in", () => {

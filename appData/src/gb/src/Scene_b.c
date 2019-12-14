@@ -57,7 +57,7 @@ UBYTE last_joy;
 
 static void SceneHandleInput();
 void SceneRender();
-UBYTE SceneNpcAt_b(UBYTE index, UBYTE tx_a, UBYTE ty_a);
+UBYTE SceneNpcAt_b(UBYTE index, UBYTE tx_a, UBYTE ty_a, UBYTE inc_noclip);
 UBYTE ScenePlayerAt_b(UBYTE tx_a, UBYTE ty_a);
 UBYTE SceneTriggerAt_b(UBYTE tx_a, UBYTE ty_a);
 void SceneUpdateActors_b();
@@ -73,6 +73,7 @@ void SceneUpdateActorMovement_b(UBYTE i);
 void SceneSetEmote_b(UBYTE actor, UBYTE type);
 void SceneHandleWait();
 void SceneHandleTransition();
+void SceneUpdateTimer_b();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Initialise
@@ -136,6 +137,7 @@ void SceneInit_b2()
     actors[i].sprite = ReadBankedUBYTE(bank_ptr.bank, scene_load_ptr);
     // LOG("ACTOR_SPRITE=%u\n", actors[i].sprite);
     actors[i].enabled = TRUE;
+    actors[i].collisionsEnabled = TRUE;
     actors[i].moving = FALSE;
     actors[i].sprite_type = FALSE; // WTF needed
     actors[i].sprite_type = ReadBankedUBYTE(bank_ptr.bank, scene_load_ptr + 1);
@@ -199,6 +201,7 @@ void SceneInit_b3()
   // Init player
   actors[0].enabled = TRUE;
   actors[0].moving = FALSE;
+  actors[0].collisionsEnabled = TRUE;
   actors[0].pos.x = map_next_pos.x;
   actors[0].pos.y = map_next_pos.y;
   actors[0].dir.x = map_next_dir.x;
@@ -302,6 +305,9 @@ void SceneInit_b9()
   last_joy = 0;
   scene_loaded = TRUE;
 
+  // Disable timer script
+  timer_script_duration = 0;
+
   SHOW_SPRITES;
   DISPLAY_ON;
 }
@@ -315,6 +321,7 @@ void SceneUpdate_b()
   SceneUpdateCameraShake_b();
   SceneUpdateCamera_b();
   SceneRender();
+  SceneUpdateTimer_b();
   SceneHandleInput();
   ScriptRunnerUpdate();
   SceneUpdateActors_b();
@@ -409,7 +416,10 @@ void SceneUpdateActors_b()
   // Handle script move
   if (actor_move_settings & ACTOR_MOVE_ENABLED && ACTOR_ON_TILE(script_actor))
   {
-    if (actors[script_actor].pos.x == actor_move_dest.x && actors[script_actor].pos.y == actor_move_dest.y)
+    if (actors[script_actor].pos.x == actor_move_dest.x &&
+        ((actors[script_actor].pos.y == actor_move_dest.y) ||
+         // If destination is bottom edge check if wrapped around scene
+         (actors[script_actor].pos.y == 0 && actor_move_dest.y == ACTOR_MAX_Y)))
     {
       actor_move_settings &= ~ACTOR_MOVE_ENABLED;
       script_action_complete = TRUE;
@@ -550,6 +560,11 @@ void SceneUpdateActors_b()
         ACTOR_X(ptr) = ACTOR_X(ptr) + ACTOR_DX(ptr) * ACTOR_MOVE_SPEED(ptr);
         ACTOR_Y(ptr) = ACTOR_Y(ptr) + ACTOR_DY(ptr) * ACTOR_MOVE_SPEED(ptr);
       }
+      // Handle Y wrapping
+      if (ACTOR_DY(ptr) == 1 && LT_8(ACTOR_Y(ptr)))
+      {
+        ACTOR_Y(ptr) = ACTOR_MAX_Y;
+      }
     }
   }
   else
@@ -571,6 +586,11 @@ void SceneUpdateActors_b()
         {
           ACTOR_X(ptr) = ACTOR_X(ptr) + ACTOR_DX(ptr) * ACTOR_MOVE_SPEED(ptr);
           ACTOR_Y(ptr) = ACTOR_Y(ptr) + ACTOR_DY(ptr) * ACTOR_MOVE_SPEED(ptr);
+        }
+        // Handle Y wrapping
+        if (ACTOR_DY(ptr) == 1 && LT_8(ACTOR_Y(ptr)))
+        {
+          ACTOR_Y(ptr) = ACTOR_MAX_Y;
         }
       }
       ptr += jump;
@@ -630,27 +650,58 @@ void SceneUpdateActorMovement_b(UBYTE i)
   next_ty = DIV_8(actors[i].pos.y) + actors[i].dir.y;
 
   // Check for npc collisions
-  npc = SceneNpcAt_b(i, next_tx, next_ty);
-  if (npc != scene_num_actors)
+  if (actors[i].collisionsEnabled)
   {
-    actors[i].moving = FALSE;
-    return;
-  }
+    npc = SceneNpcAt_b(i, next_tx, next_ty, FALSE);
+    if (npc != scene_num_actors)
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
 
-  // Check collisions on left tile
-  collision_index = ((UWORD)scene_width * (next_ty - 1)) + (next_tx - 1);
-  if (scene_col_tiles[collision_index >> 3] & (1 << (collision_index & 7)))
-  {
-    actors[i].moving = FALSE;
-    return;
-  }
+    // Stop at left edge
+    if (actors[i].dir.x == -1 && next_tx == 0)
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
 
-  // Check collisions on right tile
-  collision_index = ((UWORD)scene_width * (next_ty - 1)) + (next_tx - 1) + 1;
-  if (scene_col_tiles[collision_index >> 3] & (1 << (collision_index & 7)))
-  {
-    actors[i].moving = FALSE;
-    return;
+    // Stop at right edge
+    if (actors[i].dir.x == 1 && next_tx == scene_width)
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
+
+    // Stop at top edge
+    if (actors[i].dir.y == -1 && next_ty == 0)
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
+
+    // Stop at bottom edge
+    if (actors[i].dir.y == 1 && (next_ty == (scene_height + 1) || actors[i].pos.y == ACTOR_MAX_Y))
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
+
+    // Check collisions on left tile
+    collision_index = ((UWORD)scene_width * (next_ty - 1)) + (next_tx - 1);
+    if (scene_col_tiles[collision_index >> 3] & (1 << (collision_index & 7)))
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
+
+    // Check collisions on right tile
+    collision_index = ((UWORD)scene_width * (next_ty - 1)) + (next_tx - 1) + 1;
+    if (scene_col_tiles[collision_index >> 3] & (1 << (collision_index & 7)))
+    {
+      actors[i].moving = FALSE;
+      return;
+    }
   }
 
   if (i == 0)
@@ -660,16 +711,64 @@ void SceneUpdateActorMovement_b(UBYTE i)
   actors[i].moving = TRUE;
 }
 
+void SceneUpdateTimer_b()
+{
+  // Don't update timer when scene is loading
+  if (!scene_loaded || !scene_input_ready)
+  {
+    return;
+  }
+
+  // Don't update timer while script is running
+  if (script_ptr != 0 || emote_timer != 0 || fade_running)
+  {
+    return;
+  }
+
+  // Don't update timer when UI is open
+  if (!UIIsClosed())
+  {
+    return;
+  }
+
+  // Check if timer is enabled
+  if (timer_script_duration != 0)
+  {
+    if (timer_script_time == 0)
+    {
+      // Don't start script when actor is between tiles
+      if (!ACTOR_ON_TILE(0))
+      {
+        return;
+      }
+
+      last_joy = last_joy & 0xF0;
+      ScriptStart(&timer_script_ptr);
+
+      // Reset the countdown timer
+      timer_script_time = timer_script_duration;
+    }
+    else
+    {
+      // Timer tick every 16 frames
+      if ((time & 0x0F) == 0x00)
+      {
+        --timer_script_time;
+      }
+    }
+  }
+}
+
 void SceneHandleTriggers_b()
 {
   UBYTE trigger, trigger_tile_offset;
 
-  if (check_triggers && script_ptr == 0 && (ACTOR_ON_TILE(0) || actors[0].pos.y == 254))
+  if (check_triggers && script_ptr == 0 && (ACTOR_ON_TILE(0)))
   {
     check_triggers = FALSE;
 
     // If at bottom of map offset tile lookup by 1 (look at tile 32 rather than 31)
-    trigger_tile_offset = actors[0].pos.y == 254;
+    trigger_tile_offset = actors[0].pos.y == ACTOR_MAX_Y;
 
     trigger =
         SceneTriggerAt_b(DIV_8(actors[0].pos.x),
@@ -784,7 +883,7 @@ static void SceneHandleInput()
     actors[0].moving = FALSE;
     next_tx = DIV_8(actors[0].pos.x) + actors[0].dir.x;
     next_ty = DIV_8(actors[0].pos.y) + actors[0].dir.y;
-    npc = SceneNpcAt_b(0, next_tx, next_ty);
+    npc = SceneNpcAt_b(0, next_tx, next_ty, TRUE);
     if (npc != scene_num_actors)
     {
       actors[0].moving = FALSE;
@@ -1004,7 +1103,7 @@ UBYTE ScenePlayerAt_b(UBYTE tx_a, UBYTE ty_a)
   }
 }
 
-UBYTE SceneNpcAt_b(UBYTE index, UBYTE tx_a, UBYTE ty_a)
+UBYTE SceneNpcAt_b(UBYTE index, UBYTE tx_a, UBYTE ty_a, UBYTE inc_noclip)
 {
   UBYTE i, tx_b, ty_b, jump;
   UBYTE *ptr;
@@ -1014,13 +1113,19 @@ UBYTE SceneNpcAt_b(UBYTE index, UBYTE tx_a, UBYTE ty_a)
 
   for (i = 0; i != scene_num_actors; i++)
   {
-    if (i == index || !ACTOR_ENABLED(ptr))
+    if (i == index || !ACTOR_ENABLED(ptr) || (!inc_noclip && !ACTOR_COLLISIONS_ENABLED(ptr)))
     {
       ptr += jump;
       continue;
     }
     tx_b = DIV_8(ACTOR_X(ptr));
     ty_b = DIV_8(ACTOR_Y(ptr));
+    if (ty_b == 0)
+    {
+      // If actor at posY=256 (really 0 since 8bit) convert to correct tile
+      // since DIV_8 will give tile as 0 rather than 32
+      ty_b = 32;
+    }
     if ((ty_a == ty_b || ty_a == ty_b - 1) &&
         (tx_a == tx_b || tx_a == tx_b + 1 || tx_a + 1 == tx_b))
     {

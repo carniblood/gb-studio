@@ -7,6 +7,7 @@ import {
   ACTOR_SET_FRAME_TO_VALUE,
   ACTOR_SET_FLIP,
   ACTOR_PUSH,
+  ACTOR_SET_COLLISIONS,
   TEXT,
   TEXT_MULTI,
   SET_TRUE,
@@ -74,7 +75,15 @@ import {
   REMOVE_INPUT_SCRIPT,
   VARIABLE_ADD_FLAGS,
   VARIABLE_CLEAR_FLAGS,
-  TEXT_WITH_AVATAR
+  SOUND_START_TONE,
+  SOUND_STOP_TONE,
+  SOUND_PLAY_BEEP,
+  SOUND_PLAY_CRASH,
+  SET_TIMER_SCRIPT,
+  TIMER_RESTART,
+  TIMER_DISABLE,
+  TEXT_WITH_AVATAR,
+  MENU
 } from "../events/scriptCommands";
 import {
   getActorIndex,
@@ -97,13 +106,14 @@ class ScriptBuilder {
   constructor(output, options) {
     this.output = output;
     this.options = options;
-    this.labels = {};
   }
 
   actorSetActive = id => {
     const output = this.output;
-    const { scene } = this.options;
-    const index = getActorIndex(id, scene);
+    const { scene, entity } = this.options;
+    const index = id === "$self$"
+      ? getActorIndex(entity.id, scene)
+      : getActorIndex(id, scene);
     output.push(cmd(ACTOR_SET_ACTIVE));
     output.push(index);
   };
@@ -185,7 +195,7 @@ class ScriptBuilder {
   actorSetFrameToVariable = variable => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(ACTOR_SET_FRAME_TO_VALUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -224,6 +234,12 @@ class ScriptBuilder {
     output.push(cmd(ACTOR_HIDE));
   };
 
+  actorSetCollisions = enabled => {
+    const output = this.output;
+    output.push(cmd(ACTOR_SET_COLLISIONS));
+    output.push(enabled ? 1 : 0);
+  };
+
   // Player
 
   playerSetSprite = spriteSheetId => {
@@ -248,9 +264,10 @@ class ScriptBuilder {
 
   // Text
 
-  textDialogue = (text = " ", avatarId) => {
+  textDialogue = (inputText = " ", avatarId) => {
     const output = this.output;
-    const { strings, avatars } = this.options;
+    const { strings, avatars, variables, event } = this.options;
+    const text = this.replaceVariables(inputText, variables, event);
     let stringIndex = strings.indexOf(text);
     if (stringIndex === -1) {
       strings.push(text);
@@ -265,25 +282,54 @@ class ScriptBuilder {
     } else {
       output.push(cmd(TEXT));
       output.push(hi(stringIndex));
-      output.push(lo(stringIndex));  
+      output.push(lo(stringIndex));
     }
   };
 
   textChoice = (setVariable, args) => {
     const output = this.output;
-    const { strings, variables } = this.options;
+    const { strings, variables, event } = this.options;
     const choiceText = combineMultipleChoiceText(args);
-    let stringIndex = strings.indexOf(choiceText);
+    const text = this.replaceVariables(choiceText, variables, event);
+    let stringIndex = strings.indexOf(text);
     if (stringIndex === -1) {
-      strings.push(choiceText);
+      strings.push(text);
       stringIndex = strings.length - 1;
     }
-    const variableIndex = getVariableIndex(setVariable, variables);
+    const variableIndex = this.getVariableIndex(setVariable, variables);
     output.push(cmd(CHOICE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
     output.push(hi(stringIndex));
     output.push(lo(stringIndex));
+  };
+
+  textMenu = (
+    setVariable,
+    options,
+    layout = "menu",
+    cancelOnLastOption = false,
+    cancelOnB = false
+  ) => {
+    const output = this.output;
+    const { strings, variables, event } = this.options;
+    const menuText = options
+      .map((option, index) => option || `Item ${index + 1}`)
+      .join("\n");
+    const text = this.replaceVariables(menuText, variables, event);
+    let stringIndex = strings.indexOf(text);
+    if (stringIndex === -1) {
+      strings.push(text);
+      stringIndex = strings.length - 1;
+    }
+    const variableIndex = this.getVariableIndex(setVariable, variables);
+    output.push(cmd(MENU));
+    output.push(hi(variableIndex));
+    output.push(lo(variableIndex));
+    output.push(hi(stringIndex));
+    output.push(lo(stringIndex));
+    output.push(layout === "menu" ? 1 : 0);
+    output.push((cancelOnLastOption ? 1 : 0) | (cancelOnB ? 2 : 0));
   };
 
   textSetOpenInstant = () => {
@@ -320,10 +366,18 @@ class ScriptBuilder {
 
   // Variables
 
+  getVariableIndex = (variable = "0", variables) => {
+    if (["L0", "L1", "L2", "L3"].indexOf(variable) > -1) {
+      const { entity } = this.options;
+      return getVariableIndex(`${entity.id}__${variable}`, variables);
+    }
+    return getVariableIndex(variable, variables);
+  };
+
   variableSetToTrue = variable => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(SET_TRUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -332,7 +386,7 @@ class ScriptBuilder {
   variableSetToFalse = variable => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(SET_FALSE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -341,7 +395,7 @@ class ScriptBuilder {
   variableSetToValue = (variable, value) => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(SET_VALUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -357,7 +411,7 @@ class ScriptBuilder {
   variableSetToRandom = (variable, min, range) => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(SET_RANDOM_VALUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -398,8 +452,8 @@ class ScriptBuilder {
   vectorsLoad = (variableX, variableY) => {
     const output = this.output;
     const { variables } = this.options;
-    const indexX = getVariableIndex(variableX, variables);
-    const indexY = getVariableIndex(variableY, variables);
+    const indexX = this.getVariableIndex(variableX, variables);
+    const indexY = this.getVariableIndex(variableY, variables);
     output.push(cmd(LOAD_VECTORS));
     output.push(hi(indexX));
     output.push(lo(indexX));
@@ -410,7 +464,7 @@ class ScriptBuilder {
   variableInc = variable => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(INC_VALUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -419,7 +473,7 @@ class ScriptBuilder {
   variableDec = variable => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(cmd(DEC_VALUE));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
@@ -433,21 +487,21 @@ class ScriptBuilder {
   variableAddFlags = (setVariable, flags) => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(setVariable, variables);
+    const variableIndex = this.getVariableIndex(setVariable, variables);
     output.push(cmd(VARIABLE_ADD_FLAGS));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
-    output.push(flags); 
+    output.push(flags);
   };
 
   variableClearFlags = (setVariable, flags) => {
     const output = this.output;
     const { variables } = this.options;
-    const variableIndex = getVariableIndex(setVariable, variables);
+    const variableIndex = this.getVariableIndex(setVariable, variables);
     output.push(cmd(VARIABLE_CLEAR_FLAGS));
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
-    output.push(flags); 
+    output.push(flags);
   };
 
   // Scenes
@@ -518,7 +572,7 @@ class ScriptBuilder {
     const output = this.output;
     const { variables } = this.options;
     output.push(cmd(IF_TRUE));
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
     compileConditional(truePath, falsePath, {
@@ -537,7 +591,7 @@ class ScriptBuilder {
     const output = this.output;
     const { variables } = this.options;
     output.push(cmd(IF_VALUE));
-    const variableIndex = getVariableIndex(variable, variables);
+    const variableIndex = this.getVariableIndex(variable, variables);
     output.push(hi(variableIndex));
     output.push(lo(variableIndex));
     output.push(operatorDec(operator));
@@ -546,6 +600,83 @@ class ScriptBuilder {
       ...this.options,
       output
     });
+  };
+
+  caseVariableValue = (variable, cases = {}, falsePath = []) => {
+    const output = this.output;
+    const { variables, compileEvents } = this.options;
+    const variableIndex = this.getVariableIndex(variable, variables);
+    const caseKeys = Object.keys(cases);
+    const numCases = caseKeys.length;
+    const caseStartPtrs = [];
+    const caseBreakPtrs = [];
+
+    if (numCases === 0) {
+      // If no cases defined run default path
+      if (typeof falsePath === "function") {
+        falsePath();
+      } else if (falsePath) {
+        compileEvents(falsePath);
+      }
+    } else {
+      // Loop through cases and build IF_VALUE commands
+      for (let i = 0; i < numCases; i++) {
+        output.push(cmd(IF_VALUE));
+        output.push(hi(variableIndex));
+        output.push(lo(variableIndex));
+        output.push(operatorDec("=="));
+        output.push(caseKeys[i] || 0);
+        caseStartPtrs[i] = output.length;
+        output.push("PTR_PLACEHOLDER1");
+        output.push("PTR_PLACEHOLDER2");
+      }
+
+      // Default path
+      if (typeof falsePath === "function") {
+        falsePath();
+      } else if (falsePath) {
+        compileEvents(falsePath);
+      }
+
+      // Set placeholder for jump to end of case statement
+      output.push(cmd(JUMP));
+      const endPtrIndex = output.length;
+      output.push("PTR_PLACEHOLDER1");
+      output.push("PTR_PLACEHOLDER2");
+
+      // Loop through cases to build branches
+      for (let i = 0; i < numCases; i++) {
+        const truePointer = output.length;
+        const truePtrIndex = caseStartPtrs[i];
+        output[truePtrIndex] = truePointer >> 8;
+        output[truePtrIndex + 1] = truePointer & 0xff;
+
+        const truePath = cases[caseKeys[i]] || [];
+        if (typeof truePath === "function") {
+          truePath();
+        } else if (truePath) {
+          compileEvents(truePath);
+        }
+
+        // Store placeholders for breaks to end of case statement
+        output.push(cmd(JUMP));
+        caseBreakPtrs[i] = output.length;
+        output.push("PTR_PLACEHOLDER1");
+        output.push("PTR_PLACEHOLDER2");
+      }
+
+      // Fill default path break placeholder
+      const endIfPointer = output.length;
+      output[endPtrIndex] = endIfPointer >> 8;
+      output[endPtrIndex + 1] = endIfPointer & 0xff;
+
+      // Fill case paths break placeholders
+      for (let i = 0; i < numCases; i++) {
+        const breakPtrIndex = caseBreakPtrs[i];
+        output[breakPtrIndex] = endIfPointer >> 8;
+        output[breakPtrIndex + 1] = endIfPointer & 0xff;
+      }
+    }
   };
 
   ifVariableCompare = (
@@ -608,9 +739,10 @@ class ScriptBuilder {
   // Goto
 
   labelDefine = name => {
+    const { labels } = this.options;
     const output = this.output;
     const ptr = output.length;
-    this.labels[name] = ptr;
+    labels[name] = ptr;
     for (let i = 0; i < output.length; i++) {
       if (output[i] === `goto: ${name}`) {
         output[i] = cmd(JUMP);
@@ -621,9 +753,10 @@ class ScriptBuilder {
   };
 
   labelGoto = name => {
+    const { labels } = this.options;
     const output = this.output;
-    if (this.labels[name] !== undefined) {
-      const ptr = this.labels[name];
+    if (labels[name] !== undefined) {
+      const ptr = labels[name];
       output.push(cmd(JUMP));
       output.push(ptr >> 8);
       output.push(ptr & 0xff);
@@ -682,13 +815,13 @@ class ScriptBuilder {
     output.push(camY);
     // Direct speed in binary, first bits 0000 to 1111 are "&" compared with binary time
     // Speed 0 = 0 instant, Speed 1 = 32 0x20 move every frame, Speed 2 = 33 0x21
-    const speedFlag = (speed > 0 ? (32 + (1 << (speed - 1)) - 1) : 0);
+    const speedFlag = speed > 0 ? 32 + (1 << (speed - 1)) - 1 : 0;
     output.push(speedFlag);
   };
 
   cameraLock = (speed = 0) => {
     const output = this.output;
-    const speedFlag = (speed > 0 ? (32 + (1 << (speed - 1)) - 1) : 0);
+    const speedFlag = speed > 0 ? 32 + (1 << (speed - 1)) - 1 : 0;
     output.push(cmd(CAMERA_LOCK));
     output.push(speedFlag);
   };
@@ -731,6 +864,42 @@ class ScriptBuilder {
     output.push(cmd(MUSIC_STOP));
   };
 
+  // Sound
+
+  soundStartTone = (period = 1600) => {
+    const output = this.output;
+
+    // start playing tone
+    output.push(cmd(SOUND_START_TONE));
+    output.push(hi(period));
+    output.push(lo(period));
+  };
+
+  soundStopTone = () => {
+    const output = this.output;
+    output.push(cmd(SOUND_STOP_TONE));
+  };
+
+  soundPlayBeep = (pitch = 4) => {
+    const output = this.output;
+
+    pitch = pitch - 1;
+    if (pitch < 0) {
+      pitch = 0;
+    }
+    if (pitch >= 8) {
+      pitch = 7;
+    }
+
+    output.push(cmd(SOUND_PLAY_BEEP));
+    output.push(pitch & 0x07);
+  };
+
+  soundPlayCrash = () => {
+    const output = this.output;
+    output.push(cmd(SOUND_PLAY_CRASH));
+  };
+
   // Data
 
   dataLoad = () => {
@@ -764,6 +933,50 @@ class ScriptBuilder {
   scriptEnd = () => {
     const output = this.output;
     output.push(cmd(END));
+  };
+
+  // Timer Script
+
+  timerScriptSet = (duration = 10.0, script) => {
+    const output = this.output;
+    const { compileEvents, banked } = this.options;
+
+    // convert the duration from seconds to timer ticks
+    const TIMER_CYCLES = 16;
+    let durationTicks = ((60 * duration) / TIMER_CYCLES + 0.5) | 0;
+    if (durationTicks <= 0) {
+      durationTicks = 1;
+    }
+    if (durationTicks >= 256) {
+      durationTicks = 255;
+    }
+
+    // compile event script
+    const subScript = [];
+    if (typeof script === "function") {
+      this.output = subScript;
+      script();
+      this.output = output;
+    } else {
+      compileEvents(script, subScript, false);
+    }
+    const bankPtr = banked.push(subScript);
+
+    output.push(cmd(SET_TIMER_SCRIPT));
+    output.push(durationTicks);
+    output.push(bankPtr.bank);
+    output.push(hi(bankPtr.offset));
+    output.push(lo(bankPtr.offset));
+  };
+
+  timerRestart = () => {
+    const output = this.output;
+    output.push(cmd(TIMER_RESTART));
+  };
+
+  timerDisable = () => {
+    const output = this.output;
+    output.push(cmd(TIMER_DISABLE));
   };
 
   // Helpers
@@ -800,6 +1013,28 @@ class ScriptBuilder {
       return actor.id;
     }
     throw new Error(`Actor ${name} not found`);
+  };
+
+  replaceVariables = (string, variables, event) => {
+    const getVariableSymbol = index => `$${String(index).padStart(2, "0")}$`;
+    
+    return string
+    // Replace Global variables
+    .replace(/\$([0-9]+)\$/g, (match, globalVariable) => {
+      const index = this.getVariableIndex(globalVariable, variables);
+      return getVariableSymbol(index);
+    })
+    // Replace Local variables
+    .replace(/\$(L[0-9])\$/g, (match, localVariable) => {
+      const index = this.getVariableIndex(localVariable, variables);
+      return getVariableSymbol(index);
+    })
+    // Replace Custom Event variables
+    .replace(/\$V([0-9])\$/g, (match, customVariable) => {
+      const mappedVariable = event.args[`$variable[${customVariable}]$`];
+      const index = this.getVariableIndex(mappedVariable, variables);
+      return getVariableSymbol(index);
+    });
   };
 }
 

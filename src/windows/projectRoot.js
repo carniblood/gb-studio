@@ -4,6 +4,7 @@ import { Provider } from "react-redux";
 import { ActionCreators } from "redux-undo";
 import { ipcRenderer } from "electron";
 import settings from "electron-settings";
+import { debounce } from "lodash";
 import * as actions from "../actions";
 import configureStore from "../store/configureStore";
 import watchProject from "../lib/project/watchProject";
@@ -38,6 +39,16 @@ window.undo = () => {
   store.dispatch(ActionCreators.undo());
 };
 
+window.addEventListener("error", (error) => {
+  if(error.message.indexOf("dead code elimination") > -1) {
+    return true;
+  }  
+  error.stopPropagation();
+  error.preventDefault();
+  store.dispatch(actions.setGlobalError(error.message, error.filename, error.lineno, error.colno, error.error.stack));
+  return false;
+});
+
 ipcRenderer.on("save-project", () => {
   store.dispatch(actions.saveProject());
 });
@@ -57,6 +68,10 @@ ipcRenderer.on("redo", () => {
 
 ipcRenderer.on("section", (event, section) => {
   store.dispatch(actions.setSection(section));
+});
+
+ipcRenderer.on("reloadAssets", (event) => {
+  store.dispatch(actions.reloadAssets());
 });
 
 ipcRenderer.on("updateSetting", (event, setting, value) => {
@@ -106,6 +121,12 @@ if (worldSidebarWidth) {
 if (filesSidebarWidth) {
   store.dispatch(actions.resizeFilesSidebar(filesSidebarWidth));
 }
+
+window.addEventListener("resize", debounce(() => {
+  const state = store.getState();
+  store.dispatch(actions.resizeWorldSidebar(state.settings.worldSidebarWidth));
+  store.dispatch(actions.resizeFilesSidebar(state.settings.filesSidebarWidth));
+}, 500));
 
 let modified = true;
 store.subscribe(() => {

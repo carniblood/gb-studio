@@ -2,6 +2,9 @@
 /* eslint-disable jsx-a11y/label-has-for */
 import React, { Component } from "react";
 import PropTypes from "prop-types";
+import cx from "classnames";
+import { TriangleIcon } from "../library/Icons";
+import { connect } from "react-redux";
 import SceneSelect from "../forms/SceneSelect";
 import BackgroundSelect from "../forms/BackgroundSelect";
 import SpriteSheetSelect from "../forms/SpriteSheetSelect";
@@ -17,12 +20,14 @@ import EmoteSelect from "../forms/EmoteSelect";
 import { FormField, ToggleableFormField } from "../library/Forms";
 import OverlayColorSelect from "../forms/OverlayColorSelect";
 import MusicSelect from "../forms/MusicSelect";
+import SoundEffectSelect from "../forms/SoundEffectSelect";
 import castEventValue from "../../lib/helpers/castEventValue";
 import OperatorSelect from "../forms/OperatorSelect";
 import { textNumLines } from "../../lib/helpers/trimlines";
 import events from "../../lib/events";
 import GBScriptEditor from "../library/GBScriptEditor";
 import rerenderCheck from "../../lib/helpers/reactRerenderCheck";
+import { CustomEventShape } from "../../reducers/stateShape";
 
 const genKey = (id, key, index) => `${id}_${key}_${index || 0}`;
 
@@ -36,18 +41,18 @@ class TextArea extends Component {
       el.selectionStart = cursorPosition;
       el.selectionEnd = cursorPosition;
     });
-  }
+  };
 
   render() {
     const { id, value, rows, placeholder } = this.props;
     return (
       <textarea
-            id={id}
-            value={value || ""}
-            rows={rows || textNumLines(value)}
-            placeholder={placeholder}
-            onChange={this.onChange}
-          />
+        id={id}
+        value={value || ""}
+        rows={rows || textNumLines(value)}
+        placeholder={placeholder}
+        onChange={this.onChange}
+      />
     );
   }
 }
@@ -71,7 +76,7 @@ class ScriptEventInput extends Component {
   };
 
   render() {
-    const { type, id, value, args, field } = this.props;
+    const { type, id, value, args, field, entityId } = this.props;
 
     if (type === "textarea") {
       return (
@@ -104,7 +109,7 @@ class ScriptEventInput extends Component {
         <input
           id={id}
           type="number"
-          value={value || ""}
+          value={value !== undefined && value !== null ? value : ""}
           min={field.min}
           max={field.max}
           step={field.step}
@@ -151,11 +156,24 @@ class ScriptEventInput extends Component {
     }
     if (type === "sprite") {
       return (
-        <SpriteSheetSelect id={id} value={value} filter={field.filter} optional={field.optional} onChange={this.onChange} />
+        <SpriteSheetSelect
+          id={id}
+          value={value}
+          filter={field.filter}
+          optional={field.optional}
+          onChange={this.onChange}
+        />
       );
     }
     if (type === "variable") {
-      return <VariableSelect id={id} value={value} onChange={this.onChange} />;
+      return (
+        <VariableSelect
+          id={id}
+          value={value || "0"}
+          entityId={entityId}
+          onChange={this.onChange}
+        />
+      );
     }
     if (type === "direction") {
       return <DirectionPicker id={id} value={value} onChange={this.onChange} />;
@@ -213,6 +231,18 @@ class ScriptEventInput extends Component {
     if (type === "music") {
       return <MusicSelect id={id} value={value} onChange={this.onChange} />;
     }
+    if (type === "soundEffect") {
+      return (
+        <SoundEffectSelect
+          id={id}
+          value={value}
+          onChange={this.onChange}
+          duration={args.duration}
+          pitch={args.pitch}
+          frequency={args.frequency}
+        />
+      );
+    }
     return <div />;
   }
 }
@@ -220,6 +250,7 @@ class ScriptEventInput extends Component {
 ScriptEventInput.propTypes = {
   index: PropTypes.number,
   id: PropTypes.string,
+  entityId: PropTypes.string.isRequired,
   type: PropTypes.string,
   field: PropTypes.shape().isRequired,
   args: PropTypes.shape(),
@@ -253,44 +284,73 @@ class ScriptEventField extends Component {
     const { key } = field;
 
     if (Array.isArray(value) && valueIndex !== undefined) {
-      return onChange({
-        [key]: value.map((v, i) => {
-          if (i !== valueIndex) {
-            return v;
-          }
-          return newValue;
-        })
-      }, field.postUpdate);
-      
+      return onChange(
+        {
+          [key]: value.map((v, i) => {
+            if (i !== valueIndex) {
+              return v;
+            }
+            return newValue;
+          })
+        },
+        field.postUpdate
+      );
     }
-    return onChange({
-      [key]: newValue
-    }, field.postUpdate);
+    return onChange(
+      {
+        [key]: newValue
+      },
+      field.postUpdate
+    );
   };
 
   onAddValue = valueIndex => e => {
     const { onChange, field, value } = this.props;
     const { key } = field;
-    return onChange({
-      [key]: [].concat(
-        [],
-        value.slice(0, valueIndex + 1),
-        field.defaultValue,
-        value.slice(valueIndex + 1)
-      )
-    }, field.postUpdate);
+    return onChange(
+      {
+        [key]: [].concat(
+          [],
+          value.slice(0, valueIndex + 1),
+          field.defaultValue,
+          value.slice(valueIndex + 1)
+        )
+      },
+      field.postUpdate
+    );
   };
 
   onRemoveValue = valueIndex => e => {
     const { onChange, field, value } = this.props;
     const { key } = field;
-    return onChange({
-      [key]: value.filter((_v, i) => i !== valueIndex)
-    }, field.postUpdate);
+    return onChange(
+      {
+        [key]: value.filter((_v, i) => i !== valueIndex)
+      },
+      field.postUpdate
+    );
   };
 
   render() {
-    const { eventId, field, value, args } = this.props;
+    const { eventId, field, value, args, entityId } = this.props;
+
+    let label = field.label;
+    if (label && label.replace) {
+      label = label.replace(/\$\$([^$]*)\$\$/g, (match, key) => args[key] || 0);
+    }
+
+    if (field.type === "collapsable") {
+      return (
+        <div
+          className={cx("ActionMini__Else", {
+            "ActionMini__Else--Open": !value
+          })}
+          onClick={() => this.onChange(!value)}
+        >
+          <TriangleIcon /> {label}
+        </div>
+      );
+    }
 
     const inputField = field.multiple ? (
       value.map((_, valueIndex) => {
@@ -299,6 +359,7 @@ class ScriptEventField extends Component {
           <span key={fieldId} className="ScriptEventBlock__InputRow">
             <ScriptEventInput
               id={fieldId}
+              entityId={entityId}
               type={field.type}
               field={field}
               index={valueIndex}
@@ -328,6 +389,7 @@ class ScriptEventField extends Component {
     ) : (
       <ScriptEventInput
         id={genKey(eventId, field.key)}
+        entityId={entityId}
         type={field.type}
         field={field}
         value={value}
@@ -352,9 +414,9 @@ class ScriptEventField extends Component {
     return (
       <FormField halfWidth={field.width === "50%"}>
         <label htmlFor={genKey(eventId, field.key)}>
-          {field.type !== "checkbox" && field.label}
+          {field.type !== "checkbox" && field.type !== "group" && label}
           {inputField}
-          {field.type === "checkbox" && field.label}
+          {field.type === "checkbox" && label}
         </label>
       </FormField>
     );
@@ -363,6 +425,7 @@ class ScriptEventField extends Component {
 
 ScriptEventField.propTypes = {
   eventId: PropTypes.string.isRequired,
+  entityId: PropTypes.string.isRequired,
   field: PropTypes.shape().isRequired,
   args: PropTypes.shape(),
   value: PropTypes.oneOfType([
@@ -387,51 +450,119 @@ class ScriptEventBlock extends Component {
     return true;
   }
 
-  render() {
-    const { command, id, value, onChange } = this.props;
-    const fields = (events[command] && events[command].fields) || [];
-
-    return (
-      <div className="ScriptEventBlock">
-        {fields.map((field, index) => {
-          if (field.showIfKey) {
-            if (value[field.showIfKey] !== field.showIfValue) {
-              return null;
+  getFields() {
+    const { command, value, customEvents } = this.props;
+    const eventCommands = (events[command] && events[command].fields) || [];
+    if (value.customEventId && customEvents[value.customEventId]) {
+      const customEvent = customEvents[value.customEventId];
+      const description = customEvent.description
+        ? [
+            {
+              label: customEvent.description
+                .split("\n")
+                .map((text, index) => <div key={index}>{text || <div>&nbsp;</div>}</div>)
             }
-          }
-          if (field.type === "events") {
-            return null;
-          }
+          ]
+        : [];
+      const usedVariables =
+        Object.values(customEvent.variables).map(v => {
+          return {
+            label: `${v.name}`,
+            defaultValue: "LAST_VARIABLE",
+            key: `$variable[${v.id}]$`,
+            type: "variable"
+          };
+        }) || [];
+      const usedActors =
+        Object.values(customEvent.actors).map(a => {
+          return {
+            label: `${a.name}`,
+            defaultValue: "player",
+            key: `$actor[${a.id}]$`,
+            type: "actor"
+          };
+        }) || [];
 
-          const fieldValue = field.multiple
-            ? [].concat([], value[field.key])
-            : value[field.key];
+      return [].concat(description, eventCommands, usedVariables, usedActors);
+    }
+    return eventCommands;
+  }
 
+  renderFields = fields => {
+    const { id, value, renderEvents, onChange, entityId } = this.props;
+    return fields.map((field, index) => {
+      if (field.hide) {
+        return null;
+      }
+      // Determine if field conditions are met and hide if not
+      if (field.conditions) {
+        const showField = field.conditions.reduce((memo, condition) => {
+          const keyValue = value[condition.key];
           return (
-            <ScriptEventField
-              key={genKey(id, field.key)}
-              eventId={id}
-              field={field}
-              value={fieldValue}
-              args={value}
-              onChange={onChange}
-            />
+            memo &&
+            (!condition.eq || keyValue === condition.eq) &&
+            (!condition.ne || keyValue !== condition.ne) &&
+            (!condition.gt || keyValue > condition.gt) &&
+            (!condition.gte || keyValue >= condition.gte) &&
+            (!condition.lt || keyValue > condition.lt) &&
+            (!condition.lte || keyValue >= condition.lte)
           );
-        })}
-      </div>
-    );
+        }, true);
+        if (!showField) {
+          return null;
+        }
+      }
+
+      if (field.type === "events") {
+        return renderEvents(field.key);
+      }
+
+      const fieldValue = field.multiple
+        ? [].concat([], value[field.key])
+        : value[field.key];
+
+      return (
+        <ScriptEventField
+          key={genKey(id, field.key)}
+          eventId={id}
+          entityId={entityId}
+          field={field}
+          value={fieldValue}
+          args={value}
+          onChange={onChange}
+        />
+      );
+    });
+  };
+
+  render() {
+    const fields = this.getFields();
+    return <div className="ScriptEventBlock">{this.renderFields(fields)}</div>;
   }
 }
 
 ScriptEventBlock.propTypes = {
   id: PropTypes.string.isRequired,
+  entityId: PropTypes.string.isRequired,
   command: PropTypes.string.isRequired,
-  value: PropTypes.shape({}),
-  onChange: PropTypes.func.isRequired
+  value: PropTypes.shape({
+    customEventId: PropTypes.string
+  }),
+  onChange: PropTypes.func.isRequired,
+  renderEvents: PropTypes.func.isRequired,
+  customEvents: PropTypes.objectOf(CustomEventShape)
 };
 
 ScriptEventBlock.defaultProps = {
-  value: {}
+  value: {},
+  customEvents: []
 };
 
-export default ScriptEventBlock;
+function mapStateToProps(state) {
+  const customEvents = state.entities.present.entities.customEvents || {};
+  return {
+    customEvents
+  };
+}
+
+export default connect(mapStateToProps)(ScriptEventBlock);

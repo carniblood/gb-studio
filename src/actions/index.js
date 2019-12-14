@@ -13,6 +13,7 @@ import {
 } from "../reducers/editorReducer";
 import { denormalizeProject } from "../reducers/entitiesReducer";
 import migrateWarning from "../lib/project/migrateWarning";
+import parseAssetPath from "../lib/helpers/path/parseAssetPath";
 
 const asyncAction = async (
   dispatch,
@@ -30,6 +31,17 @@ const asyncAction = async (
     console.error(e);
     dispatch({ type: failureType });
   }
+};
+
+export const setGlobalError = (message, filename, line, col, stackTrace) => {
+  return {
+    type: types.SET_GLOBAL_ERROR,
+    message,
+    filename,
+    line,
+    col,
+    stackTrace
+  };
 };
 
 export const resizeWorldSidebar = width => {
@@ -61,7 +73,20 @@ export const loadProject = path => async dispatch => {
     types.PROJECT_LOAD_SUCCESS,
     types.PROJECT_LOAD_FAILURE,
     async () => {
-      const shouldOpenProject = await migrateWarning(path);
+      let shouldOpenProject = false;
+      try {
+        shouldOpenProject = await migrateWarning(path);
+      } catch (error) {
+        dispatch(
+          setGlobalError(
+            error.message,
+            error.filename,
+            error.lineno,
+            error.colno,
+            error.stack
+          )
+        );
+      }
       if (!shouldOpenProject) {
         throw new Error("Cancelled opening project");
       }
@@ -94,13 +119,8 @@ export const loadSprite = filename => async (dispatch, getState) => {
 export const removeSprite = filename => async (dispatch, getState) => {
   const state = getState();
   const projectRoot = state.document && state.document.root;
-  const relativePath = filename.replace(projectRoot, "");
-  const plugin = relativePath.startsWith("/plugin")
-    ? relativePath.replace(/\/plugins\/([^/]*)\/.*/, "$1")
-    : undefined;
-  const file = plugin
-    ? relativePath.replace(`/plugins/${plugin}/sprites/`, "")
-    : relativePath.replace("/assets/sprites/", "");
+  const { file, plugin } = parseAssetPath(filename, projectRoot, "sprites");
+
   return dispatch({
     type: types.SPRITE_REMOVE,
     data: {
@@ -130,13 +150,8 @@ export const loadBackground = filename => async (dispatch, getState) => {
 export const removeBackground = filename => async (dispatch, getState) => {
   const state = getState();
   const projectRoot = state.document && state.document.root;
-  const relativePath = filename.replace(projectRoot, "");
-  const plugin = relativePath.startsWith("/plugin")
-    ? relativePath.replace(/\/plugins\/([^/]*)\/.*/, "$1")
-    : undefined;
-  const file = plugin
-    ? relativePath.replace(`/plugins/${plugin}/backgrounds/`, "")
-    : relativePath.replace("/assets/backgrounds/", "");
+  const { file, plugin } = parseAssetPath(filename, projectRoot, "backgrounds");
+
   return dispatch({
     type: types.BACKGROUND_REMOVE,
     data: {
@@ -166,13 +181,8 @@ export const loadMusic = filename => async (dispatch, getState) => {
 export const removeMusic = filename => async (dispatch, getState) => {
   const state = getState();
   const projectRoot = state.document && state.document.root;
-  const relativePath = filename.replace(projectRoot, "");
-  const plugin = relativePath.startsWith("/plugin")
-    ? relativePath.replace(/\/plugins\/([^/]*)\/.*/, "$1")
-    : undefined;
-  const file = plugin
-    ? relativePath.replace(`/plugins/${plugin}/music/`, "")
-    : relativePath.replace("/assets/music/", "");
+  const { file, plugin } = parseAssetPath(filename, projectRoot, "music");
+
   return dispatch({
     type: types.MUSIC_REMOVE,
     data: {
@@ -192,6 +202,33 @@ export const playMusic = filename => {
 export const pauseMusic = () => {
   return {
     type: types.PAUSE_MUSIC
+  };
+};
+
+export const playSoundFxBeep = pitch => {
+  return {
+    type: types.PLAY_SOUNDFX_BEEP,
+    pitch
+  };
+};
+
+export const playSoundFxTone = (frequency, duration) => {
+  return {
+    type: types.PLAY_SOUNDFX_TONE,
+    frequency,
+    duration
+  };
+};
+
+export const playSoundFxCrash = () => {
+  return {
+    type: types.PLAY_SOUNDFX_CRASH
+  };
+};
+
+export const pauseSoundFx = () => {
+  return {
+    type: types.PAUSE_SOUNDFX
   };
 };
 
@@ -397,6 +434,14 @@ export const selectWorld = () => {
   return { type: types.SELECT_WORLD };
 };
 
+export const selectCustomEvent = id => {
+  return { type: types.SELECT_CUSTOM_EVENT, id };
+};
+
+export const addCustomEvent = () => {
+  return { type: types.ADD_CUSTOM_EVENT, id: uuid() };
+};
+
 export const editWorld = values => {
   return { type: types.EDIT_WORLD, values };
 };
@@ -407,6 +452,14 @@ export const editProject = values => {
 
 export const editProjectSettings = values => {
   return { type: types.EDIT_PROJECT_SETTINGS, values };
+};
+
+export const editCustomEvent = (id, values) => {
+  return { type: types.EDIT_CUSTOM_EVENT, id, values };
+};
+
+export const removeCustomEvent = customEventId => {
+  return { type: types.REMOVE_CUSTOM_EVENT, customEventId };
 };
 
 export const editPlayerStartAt = (sceneId, x, y) => {
@@ -556,6 +609,10 @@ export const openHelp = page => {
 
 export const openFolder = path => {
   return { type: types.OPEN_FOLDER, path };
+};
+
+export const reloadAssets = () => {
+  return { type: types.RELOAD_ASSETS };
 };
 
 export const consoleClear = () => {

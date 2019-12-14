@@ -11,12 +11,36 @@ export const fields = [
     type: "events"
   },
   {
+    key: "__collapseElse",
+    label: l10n("FIELD_ELSE"),
+    type: "collapsable",
+    defaultValue: false,
+    conditions: [
+      {
+        key: "__disableElse",
+        ne: true
+      }
+    ]
+  },
+  {
     key: "false",
+    conditions: [
+      {
+        key: "__collapseElse",
+        ne: true
+      },
+      {
+        key: "__disableElse",
+        ne: true
+      }
+    ],
     type: "events"
   }
 ];
 
 export const compile = (input, helpers) => {
   const { ifDataSaved } = helpers;
-  ifDataSaved(input.true, input.false);
+  const truePath = input.true;
+  const falsePath = input.__disableElse ? [] : input.false;
+  ifDataSaved(truePath, falsePath);
 };

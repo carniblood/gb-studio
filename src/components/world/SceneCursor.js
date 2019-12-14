@@ -30,7 +30,7 @@ class SceneCursor extends Component {
     if (e.ctrlKey || e.shiftKey || e.metaKey) {
       return;
     }
-    if (e.key === "p") {
+    if (e.code === "KeyP") {
       const { x, y, enabled, sceneId, editPlayerStartAt } = this.props;
       if (enabled) {
         editPlayerStartAt(sceneId, x, y);
@@ -68,7 +68,7 @@ class SceneCursor extends Component {
       this.setState({ resize: true });
       window.addEventListener("mousemove", this.onResizeTrigger);
       window.addEventListener("mouseup", this.onResizeTriggerStop);
-    } else if (tool === "collisions" && showCollisions) {
+    } else if (tool === "collisions") {
       const collisionIndex = scene.width * y + x;
       const collisionByteIndex = collisionIndex >> 3;
       const collisionByteOffset = collisionIndex & 7;
@@ -117,17 +117,14 @@ class SceneCursor extends Component {
       x,
       y,
       sceneId,
-      showCollisions,
       addCollisionTile,
       removeCollisionTile
     } = this.props;
     if (this.currentX !== x || this.currentY !== y) {
-      if (showCollisions) {
-        if (this.remove) {
-          removeCollisionTile(sceneId, x, y);
-        } else {
-          addCollisionTile(sceneId, x, y);
-        }
+      if (this.remove) {
+        removeCollisionTile(sceneId, x, y);
+      } else {
+        addCollisionTile(sceneId, x, y);
       }
       this.currentX = x;
       this.currentY = y;

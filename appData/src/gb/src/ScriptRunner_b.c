@@ -7,6 +7,7 @@
 #include "MusicManager.h"
 #include "FadeManager.h"
 #include "BankData.h"
+#include "BankManager.h"
 #include "UI.h"
 #include "Macros.h"
 #include "game.h"
@@ -342,6 +343,10 @@ void Script_ActorSetPos_b()
   actors[script_actor].pos.x = (script_cmd_args[0] << 3) + 8;
   actors[script_actor].pos.y = 0; // @wtf-but-needed
   actors[script_actor].pos.y = (script_cmd_args[1] << 3) + 8;
+  if (script_cmd_args[1] == 31)
+  {
+    actors[script_actor].pos.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -362,6 +367,10 @@ void Script_ActorMoveTo_b()
   actor_move_dest.x = (script_cmd_args[0] << 3) + 8;
   actor_move_dest.y = 0; // @wtf-but-needed
   actor_move_dest.y = (script_cmd_args[1] << 3) + 8;
+  if (script_cmd_args[1] == 31)
+  {
+    actor_move_dest.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_action_complete = FALSE;
 }
@@ -412,6 +421,20 @@ void Script_ActorHide_b()
   actors[script_actor].enabled = FALSE;
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
+}
+
+/*
+ * Command: ActorSetCollisions
+ * ----------------------------
+ * Set collisions enabled flag for actor.
+ *
+ *   arg0: Enabled
+ */
+void Script_ActorSetCollisions_b()
+{
+  actors[script_actor].collisionsEnabled = script_cmd_args[0];
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;  
 }
 
 /*
@@ -637,6 +660,18 @@ void Script_Choice_b()
 }
 
 /*
+ * Command: Menu
+ * ----------------------------
+ * Display multiple choice menu
+ */
+void Script_TextMenu_b()
+{
+  script_ptr += 1 + script_cmd_args_len;
+  UIShowMenu((script_cmd_args[0] * 256) + script_cmd_args[1], (script_cmd_args[2] * 256) + script_cmd_args[3], script_cmd_args[4], script_cmd_args[5]);
+  script_action_complete = FALSE;
+}
+
+/*
  * Command: PlayerSetSprite
  * ----------------------------
  * Change sprite used by player
@@ -684,7 +719,7 @@ void Script_ActorPush_b()
     }
     else if (actors[0].dir.x > 0)
     {
-      dest_x = 240;
+      dest_x = ACTOR_MAX_X;
     }
     else
     {
@@ -696,7 +731,7 @@ void Script_ActorPush_b()
     }
     else if (actors[0].dir.y > 0)
     {
-      dest_y = 240;
+      dest_y = ACTOR_MAX_Y;
     }
     else
     {
@@ -757,7 +792,7 @@ void Script_SaveData_b()
 {
   UWORD i;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
 
   RAMPtr = (UBYTE *)RAM_START_PTR;
   RAMPtr[0] = TRUE; // Flag to determine if data has been stored
@@ -795,7 +830,7 @@ void Script_SaveData_b()
     RAMPtr[i] = script_variables[i];
   }
 
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
@@ -810,7 +845,7 @@ void Script_LoadData_b()
 {
   UWORD i;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
 
   RAMPtr = (UBYTE *)RAM_START_PTR;
   if (*RAMPtr == TRUE)
@@ -851,7 +886,7 @@ void Script_LoadData_b()
     script_action_complete = FALSE;
   }
 
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
 }
@@ -863,10 +898,10 @@ void Script_LoadData_b()
  */
 void Script_ClearData_b()
 {
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
   RAMPtr = (UBYTE *)RAM_START_PTR;
   RAMPtr[0] = FALSE;
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
@@ -884,11 +919,11 @@ void Script_IfSavedData_b()
 {
   UBYTE jump;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
   RAMPtr = (UBYTE *)RAM_START_PTR;
   jump = 0;
   jump = *RAMPtr == TRUE;
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   if (jump)
   { // True path, jump to position specified by ptr
@@ -977,6 +1012,10 @@ void Script_ActorSetPosToVal_b()
   actors[script_actor].pos.x = (script_variables[script_ptr_x] << 3) + 8;
   actors[script_actor].pos.y = 0; // @wtf-but-needed
   actors[script_actor].pos.y = (script_variables[script_ptr_y] << 3) + 8;
+  if (script_variables[script_ptr_y] == 31)
+  {
+    actors[script_actor].pos.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -994,6 +1033,10 @@ void Script_ActorMoveToVal_b()
   actor_move_dest.x = (script_variables[script_ptr_x] << 3) + 8;
   actor_move_dest.y = 0; // @wtf-but-needed
   actor_move_dest.y = (script_variables[script_ptr_y] << 3) + 8;
+  if (script_variables[script_ptr_y] == 31)
+  {
+    actor_move_dest.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_action_complete = FALSE;
 }
@@ -1017,10 +1060,24 @@ void Script_ActorMoveRel_b()
     if (script_cmd_args[1] == 1)
     {
       actor_move_dest.x = actor_move_dest.x - (script_cmd_args[0] << 3);
+      // If destination wrapped past left edge set to min X
+      if (actor_move_dest.x > actors[script_actor].pos.x)
+      {
+        actor_move_dest.x = ACTOR_MIN_X;
+      }
+      else if (actor_move_dest.x < ACTOR_MIN_X)
+      {
+        actor_move_dest.x = ACTOR_MIN_X;
+      }
     }
     else
     {
       actor_move_dest.x = actor_move_dest.x + (script_cmd_args[0] << 3);
+      // If destination wrapped past right edge set to max X
+      if (actor_move_dest.x < actors[script_actor].pos.x)
+      {
+        actor_move_dest.x = ACTOR_MAX_X;
+      }
     }
   }
 
@@ -1031,10 +1088,24 @@ void Script_ActorMoveRel_b()
     if (script_cmd_args[3] == 1)
     {
       actor_move_dest.y = actor_move_dest.y - (script_cmd_args[2] << 3);
+      // If destination wrapped past top edge set to min Y
+      if (actor_move_dest.y > actors[script_actor].pos.y)
+      {
+        actor_move_dest.y = ACTOR_MIN_Y;
+      }
+      else if (actor_move_dest.y < ACTOR_MIN_Y)
+      {
+        actor_move_dest.y = ACTOR_MIN_Y;
+      }
     }
     else
     {
       actor_move_dest.y = actor_move_dest.y + (script_cmd_args[2] << 3);
+      // If destination wrapped past bottom edge set to max Y
+      if (actor_move_dest.y < actors[script_actor].pos.y)
+      {
+        actor_move_dest.y = ACTOR_MAX_Y;
+      }
     }
   }
 
@@ -1677,6 +1748,142 @@ void Script_VariableClearFlags_b()
   UBYTE a = script_variables[ptr];
   UBYTE b = script_cmd_args[2];
   script_variables[ptr] = a & ~b;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundStartTone
+ * ----------------------------
+ */
+void Script_SoundStartTone_b()
+{
+  UWORD tone = (script_cmd_args[0] * 256) + script_cmd_args[1];
+
+  // enable sound
+  NR52_REG = 0x80;
+
+  // play tone on channel 1
+  NR10_REG = 0x00;
+  NR11_REG = (0x00 << 6) | 0x01;
+  NR12_REG = (0x0F << 4) | 0x00;
+  NR13_REG = (tone & 0x00FF);
+  NR14_REG = 0x80 | ((tone & 0x0700) >> 8);
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 1
+  NR51_REG |= 0x11;
+
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundStopTone
+ * ----------------------------
+ */
+void Script_SoundStopTone_b()
+{
+  // stop tone on channel 1
+  NR12_REG = 0x00;
+
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundPlayBeep
+ * ----------------------------
+ */
+void Script_SoundPlayBeep_b()
+{
+  UBYTE pitch = script_cmd_args[0];
+
+  // enable sound
+  NR52_REG = 0x80;
+
+  // play beep sound on channel 4
+  NR41_REG = 0x01;
+  NR42_REG = (0x0F << 4);
+  NR43_REG = 0x20 | 0x08 | pitch;
+  NR44_REG = 0x80 | 0x40;
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 4
+  NR51_REG |= 0x88;
+
+  // no delay
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundPlayCrash
+ * ----------------------------
+ */
+void Script_SoundPlayCrash_b()
+{
+  // enable sound
+  NR52_REG = 0x80;
+
+  // play crash sound on channel 4
+  NR41_REG = 0x01;
+  NR42_REG = (0x0F << 4) | 0x02;
+  NR43_REG = 0x13;
+  NR44_REG = 0x80;
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 4
+  NR51_REG |= 0x88;
+
+  // no delay
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SetTimerScript
+ * ----------------------------
+ * Attach script to timer
+ */
+void Script_SetTimerScript_b()
+{
+  timer_script_duration = script_cmd_args[0];
+  timer_script_time = script_cmd_args[0];
+  timer_script_ptr.bank = script_cmd_args[1];
+  timer_script_ptr.offset = (script_cmd_args[2] * 256) + script_cmd_args[3];
+
+  script_action_complete = TRUE;
+  script_ptr += 1 + script_cmd_args_len;
+}
+
+/*
+ * Command: ResetTimer
+ * ----------------------------
+ * Reset the countdown timer
+ */
+void Script_ResetTimer_b()
+{
+
+  timer_script_time = timer_script_duration;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: RemoveTimerScript
+ * ----------------------------
+ * Disable timer script
+ */
+void Script_RemoveTimerScript_b()
+{
+  timer_script_duration = 0;
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }

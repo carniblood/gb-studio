@@ -184,6 +184,8 @@ const openHelp = async helpPage => {
     shell.openExternal("https://www.gbstudio.dev/docs/ui-elements/");
   } else if (helpPage === "music") {
     shell.openExternal("https://www.gbstudio.dev/docs/music/");
+  } else if (helpPage === "error") {
+    shell.openExternal("https://www.gbstudio.dev/docs/error/");
   }
 };
 
@@ -372,6 +374,10 @@ menu.on("redo", async () => {
 
 menu.on("section", async section => {
   mainWindow && mainWindow.webContents.send("section", section);
+});
+
+menu.on("reloadAssets", () => {
+  mainWindow && mainWindow.webContents.send("reloadAssets");
 });
 
 menu.on("zoom", zoomType => {
